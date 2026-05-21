@@ -1,0 +1,7 @@
+[package]
+name = "hermes-nurl"
+version = "0.1.0"
+description = "Native NURL rewrite prototype for Hermes Agent"
+license = "MIT"
+
+[dependencies]
