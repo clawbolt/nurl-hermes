@@ -463,8 +463,10 @@ $ `nurl/src/config.nu`
     : String lower ( string_to_lower safe )
     : ~ b redact F
     ? & ( string_contains lower `authorization` ) ( string_contains lower `bearer` ) { = redact T } {}
-    ? ( string_contains lower `access_token` ) { = redact T } {}
-    ? ( string_contains lower `api_key` ) { = redact T } {}
+    ? ( string_contains lower `access_token=` ) { = redact T } {}
+    ? ( string_contains lower `"access_token"` ) { = redact T } {}
+    ? ( string_contains lower `api_key=` ) { = redact T } {}
+    ? ( string_contains lower `"api_key"` ) { = redact T } {}
     ? ( string_contains lower `sk-` ) {
         ? | ( string_contains lower `token` ) ( string_contains lower `key` ) { = redact T } {}
     } {}
