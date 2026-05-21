@@ -82,7 +82,7 @@ $ `nurl/src/skills.nu`
         ( string_push_str out ` Production mode has disabled write_file, append_file, and patch for this run.` )
     }
     ? ( prompt_network_allowed ) {
-        ( string_push_str out ` You can use http_request for controlled HTTP GET/POST requests; prefer installed skill helpers for workflow-specific APIs and never fall back to raw curl for token-bearing requests.` )
+        ( string_push_str out ` You can use http_request for controlled HTTP GET/POST requests; prefer it over shell curl for plain HTTP calls. For slow service preflight/health checks, retry http_request once with a larger timeout_ms instead of probing unrelated endpoints. Prefer installed skill helpers for workflow-specific APIs and never fall back to raw curl for token-bearing requests.` )
     } {
         ( string_push_str out ` Production mode or network policy has disabled generic http_request for this run.` )
     }
