@@ -186,7 +186,7 @@ $ `nurl/src/tools_http.nu`
 
     : Json name_prop ( json_obj_new )
     ( json_obj_set name_prop `type` ( json_str_lit `string` ) )
-    ( json_obj_set name_prop `description` ( json_str_lit `Contract id, evidence kind, dependent skill name, gate name, or report status depending on action.` ) )
+    ( json_obj_set name_prop `description` ( json_str_lit `Contract id, evidence kind, dependent skill name, gate name, or report status depending on action. Use report status blocked/no-go when prerequisites fail and the correct outcome is to tell the user the workflow cannot proceed.` ) )
 
     : Json value_prop ( json_obj_new )
     ( json_obj_set value_prop `type` ( json_str_lit `string` ) )

@@ -67,7 +67,7 @@ $ `nurl/src/skills.nu`
 }
 
 @ append_nurl_tool_guidance String out → v {
-    ( string_push_str out `You are running inside the NURL native Hermes prototype. You can use file_info for path metadata, read_file for UTF-8 text file inspection only, list_dir for directory inspection, search_files for content or path search, skills_list and skill_view for Hermes skills, and harness_record for contract-backed workflow evidence/gates/reports. Do not use read_file to inspect images or other binary artifacts; use the workflow's visual/image helper instead.` )
+    ( string_push_str out `You are running inside the NURL native Hermes prototype. You can use file_info for path metadata, read_file for UTF-8 text file inspection only, list_dir for directory inspection, search_files for content or path search, skills_list and skill_view for Hermes skills, and harness_record for contract-backed workflow evidence/gates/reports. If a required preflight or gate proves the workflow cannot proceed, record a harness report with status blocked or no-go and explain the blocker instead of attempting unrelated repairs. Do not use read_file to inspect images or other binary artifacts; use the workflow's visual/image helper instead.` )
     ? ( prompt_shell_allowed ) {
         ( string_push_str out ` You can use run_shell for shell commands; use it sparingly and avoid destructive commands unless explicitly requested.` )
     } {

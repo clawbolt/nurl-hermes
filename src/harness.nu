@@ -318,6 +318,20 @@ $ `nurl/src/common.nu`
     ^ F
 }
 
+@ harness_status_blocked s status → b {
+    ? != ( nurl_str_eq status `blocked` ) 0 { ^ T } {}
+    ? == ( nurl_str_find status `blocked ` ) 0 { ^ T } {}
+    ? == ( nurl_str_find status `blocked:` ) 0 { ^ T } {}
+    ? != ( nurl_str_eq status `no-go` ) 0 { ^ T } {}
+    ? != ( nurl_str_eq status `nogo` ) 0 { ^ T } {}
+    ? != ( nurl_str_eq status `not_ready` ) 0 { ^ T } {}
+    ? != ( nurl_str_eq status `unavailable` ) 0 { ^ T } {}
+    ? != ( nurl_str_eq status `rejected` ) 0 { ^ T } {}
+    ? != ( nurl_str_eq status `refused` ) 0 { ^ T } {}
+    ? != ( nurl_str_eq status `cannot_continue` ) 0 { ^ T } {}
+    ^ F
+}
+
 @ harness_fields1 s key s value → Json {
     : Json outer ( json_obj_new )
     : Json fields ( json_obj_new )
@@ -367,6 +381,7 @@ $ `nurl/src/common.nu`
     ( harness_set_flag `HERMES_NURL_HARNESS_PREFLIGHT_PASSED` `0` )
     ( harness_set_flag `HERMES_NURL_HARNESS_PREFLIGHT_FAILED` `0` )
     ( harness_set_flag `HERMES_NURL_HARNESS_PREFLIGHT_NAMES` `` )
+    ( harness_set_flag `HERMES_NURL_HARNESS_NO_GO_REPORT` `0` )
     ( harness_emit_event `harness_run_started` contract_id ( harness_fields1 `contract` contract_id ) )
     ^ ( harness_result_json `harness_run_started` contract_id )
 }
@@ -481,6 +496,11 @@ $ `nurl/src/common.nu`
 
 @ harness_write_report s status s detail_text → String {
     ( harness_set_flag `HERMES_NURL_HARNESS_REPORT_WRITTEN` `1` )
+    ? ( harness_status_blocked status ) {
+        ( harness_set_flag `HERMES_NURL_HARNESS_NO_GO_REPORT` `1` )
+    } {
+        ( harness_set_flag `HERMES_NURL_HARNESS_NO_GO_REPORT` `0` )
+    }
     ? | | != ( nurl_str_eq status `failed` ) 0 != ( nurl_str_eq status `fail` ) 0 != ( nurl_str_eq status `error` ) 0 {
         ( harness_set_flag `HERMES_NURL_HARNESS_GATE_FAILED` `1` )
     } {
@@ -587,6 +607,10 @@ $ `nurl/src/common.nu`
             } {}
 
             ? ( env_truthy `HERMES_NURL_HARNESS_PREFLIGHT_FAILED` ) {
+                ? ( env_truthy `HERMES_NURL_HARNESS_NO_GO_REPORT` ) {
+                    ( string_free trimmed )
+                    ^ ( string_new )
+                } {}
                 : String msgp0 ( string_from `Harness contract '` )
                 ( string_push_str msgp0 ( string_data trimmed ) )
                 ( string_push_str msgp0 `' has a failed required preflight gate. Inspect harness-events and repair before final reporting.` )
@@ -603,6 +627,10 @@ $ `nurl/src/common.nu`
             } {}
 
             ? ( env_truthy `HERMES_NURL_HARNESS_GATE_FAILED` ) {
+                ? ( env_truthy `HERMES_NURL_HARNESS_NO_GO_REPORT` ) {
+                    ( string_free trimmed )
+                    ^ ( string_new )
+                } {}
                 : String msg ( string_from `Harness contract '` )
                 ( string_push_str msg ( string_data trimmed ) )
                 ( string_push_str msg `' has a failed required gate. Inspect harness-events and repair before final reporting.` )
