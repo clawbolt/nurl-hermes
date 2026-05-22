@@ -619,6 +619,10 @@ $ `nurl/src/common.nu`
             } {}
 
             ? & ( env_truthy `HERMES_NURL_HARNESS_PREFLIGHT_REQUIRED` ) ! ( env_truthy `HERMES_NURL_HARNESS_PREFLIGHT_PASSED` ) {
+                ? ( env_truthy `HERMES_NURL_HARNESS_NO_GO_REPORT` ) {
+                    ( string_free trimmed )
+                    ^ ( string_new )
+                } {}
                 : String msgp1 ( string_from `Harness contract '` )
                 ( string_push_str msgp1 ( string_data trimmed ) )
                 ( string_push_str msgp1 `' has no passed required preflight gate. Run and record the preflight before final reporting.` )
@@ -639,6 +643,10 @@ $ `nurl/src/common.nu`
             } {}
 
             ? ! ( env_truthy `HERMES_NURL_HARNESS_GATE_PASSED` ) {
+                ? ( env_truthy `HERMES_NURL_HARNESS_NO_GO_REPORT` ) {
+                    ( string_free trimmed )
+                    ^ ( string_new )
+                } {}
                 : String msg2 ( string_from `Harness contract '` )
                 ( string_push_str msg2 ( string_data trimmed ) )
                 ( string_push_str msg2 `' has no passed verification gate. Run the required gate and record it before final reporting.` )
