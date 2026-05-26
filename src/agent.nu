@@ -842,6 +842,86 @@ i max_tokens
     ^ compacted
 }
 
+// ── Shared agent turn helpers ────────────────────────────────────
+// Provider turn loops keep provider-specific request/response handling,
+// while these helpers own shared compression and reporting behavior.
+
+@ agent_compress_context s provider_label s api_key String model ( Vec Json ) msgs ( Vec Json ) tools s system_prompt_for_count i request_tokens i threshold i max_tokens → i {
+    ( trace_event_int `context_request_tokens` request_tokens )
+    ? & ( context_compression_enabled ) >= request_tokens threshold {
+        : i pruned ( context_prune_old_tool_results msgs )
+        ? > pruned 0 {
+            ( trace_event_int `context_pruned_tool_results` pruned )
+            : i before_prune_tokens request_tokens
+            = request_tokens ( context_request_tokens system_prompt_for_count msgs tools )
+            ( trace_event_int `context_request_tokens_after_prune` request_tokens )
+            ( agent_log_compression_metric provider_label `prune_tool_results` before_prune_tokens request_tokens pruned )
+        } {}
+        ? >= request_tokens threshold {
+            : i before_summary_tokens request_tokens
+            : i summarized ( agent_apply_summary provider_label api_key model msgs request_tokens max_tokens )
+            ? > summarized 0 {
+                = request_tokens ( context_request_tokens system_prompt_for_count msgs tools )
+                ( trace_event_int `context_request_tokens_after_summary` request_tokens )
+                ( agent_log_compression_metric provider_label `provider_summary` before_summary_tokens request_tokens summarized )
+            } {}
+        } {}
+        ? >= request_tokens threshold {
+            : i before_compaction_tokens request_tokens
+            : i compacted ( context_compact_middle msgs request_tokens )
+            ? > compacted 0 {
+                ( trace_event_int `context_compacted_messages` compacted )
+                = request_tokens ( context_request_tokens system_prompt_for_count msgs tools )
+                ( trace_event_int `context_request_tokens_after_compaction` request_tokens )
+                ( agent_log_compression_metric provider_label `deterministic_summary` before_compaction_tokens request_tokens compacted )
+                ( nurl_eprint `[hermes-nurl] compacted ` )
+                ( nurl_eprint ( nurl_str_int compacted ) )
+                ( nurl_eprint ` middle message(s) into a context summary\n` )
+            } {}
+        } {}
+    } {}
+    ^ request_tokens
+}
+
+@ agent_warn_context_remaining s provider_label i request_tokens i threshold b context_warned → b {
+    ? & >= request_tokens threshold ! context_warned {
+        ( nurl_eprint `[hermes-nurl] context budget still over threshold after compression passes\n` )
+        ( agent_log_compression_remaining provider_label request_tokens threshold )
+        ^ T
+    } {}
+    ^ context_warned
+}
+
+@ agent_check_max_turns b done i turn i max_turns → v {
+    ? & ! done >= turn max_turns {
+        ( nurl_eprint `[hermes-nurl] hit AGENT_MAX_TURNS without final reply\n` )
+        ( agent_emit_event_text `error` `message` `max turns without final reply` )
+        ( trace_event `agent_error` `max_turns` )
+        ( session_event `agent_error` `max_turns` )
+    } {}
+}
+
+@ agent_emit_turn_summary i total_in i total_out i turn → v {
+    ( nurl_eprint `[hermes-nurl] tokens in=` )
+    ( nurl_eprint ( nurl_str_int total_in ) )
+    ( nurl_eprint ` out=` )
+    ( nurl_eprint ( nurl_str_int total_out ) )
+    ( nurl_eprint ` turns=` )
+    ( nurl_eprint ( nurl_str_int turn ) )
+    ( nurl_eprint `\n` )
+    ( agent_emit_usage_event total_in total_out turn )
+
+    : String summary ( string_with_cap 64 )
+    ( string_push_str summary `tokens in=` )
+    ( string_push_int summary total_in )
+    ( string_push_str summary ` out=` )
+    ( string_push_int summary total_out )
+    ( string_push_str summary ` turns=` )
+    ( string_push_int summary turn )
+    ( trace_event `agent_finish` ( string_data summary ) )
+    ( string_free summary )
+}
+
 @ run_anthropic_turn s api_key String model String system_prompt ( Vec Json ) msgs ( Vec Json ) tools i max_tokens → i {
     : ~ i turn 0
     : ~ b done F
@@ -858,46 +938,11 @@ i max_tokens
         ( agent_emit_event_int `turn` `turn` turn )
         ( trace_event_int `turn_start` turn )
 
-        : i request_tokens ( context_request_tokens ( string_data system_prompt ) msgs tools )
         : i context_len ( model_context_length ( string_data model ) )
         : i threshold ( context_threshold_tokens context_len )
-        ( trace_event_int `context_request_tokens` request_tokens )
-        ? & ( context_compression_enabled ) >= request_tokens threshold {
-            : i pruned ( context_prune_old_tool_results msgs )
-            ? > pruned 0 {
-                ( trace_event_int `context_pruned_tool_results` pruned )
-                : i before_prune_tokens request_tokens
-                = request_tokens ( context_request_tokens ( string_data system_prompt ) msgs tools )
-                ( trace_event_int `context_request_tokens_after_prune` request_tokens )
-                ( agent_log_compression_metric `anthropic` `prune_tool_results` before_prune_tokens request_tokens pruned )
-            } {}
-            ? >= request_tokens threshold {
-                : i before_summary_tokens request_tokens
-                : i summarized ( agent_apply_summary `anthropic` api_key model msgs request_tokens max_tokens )
-                ? > summarized 0 {
-                    = request_tokens ( context_request_tokens ( string_data system_prompt ) msgs tools )
-                    ( trace_event_int `context_request_tokens_after_summary` request_tokens )
-                    ( agent_log_compression_metric `anthropic` `provider_summary` before_summary_tokens request_tokens summarized )
-                } {}
-            } {}
-            ? >= request_tokens threshold {
-                : i before_compaction_tokens request_tokens
-                : i compacted ( context_compact_middle msgs request_tokens )
-                ? > compacted 0 {
-                    ( trace_event_int `context_compacted_messages` compacted )
-                    = request_tokens ( context_request_tokens ( string_data system_prompt ) msgs tools )
-                    ( trace_event_int `context_request_tokens_after_compaction` request_tokens )
-                    ( agent_log_compression_metric `anthropic` `deterministic_summary` before_compaction_tokens request_tokens compacted )
-                    ( nurl_eprint `[hermes-nurl] compacted ` )
-                    ( nurl_eprint ( nurl_str_int compacted ) )
-                    ( nurl_eprint ` middle message(s) into a context summary\n` )
-                } {}
-            } {}
-            ? & >= request_tokens threshold ! context_warned {
-                ( nurl_eprint `[hermes-nurl] context budget still over threshold after compression passes\n` )
-                ( agent_log_compression_remaining `anthropic` request_tokens threshold )
-                = context_warned T
-            } {}
+        : i request_tokens ( agent_compress_context `anthropic` api_key model msgs tools ( string_data system_prompt ) ( context_request_tokens ( string_data system_prompt ) msgs tools ) threshold max_tokens )
+        ? ( context_compression_enabled ) {
+            = context_warned ( agent_warn_context_remaining `anthropic` request_tokens threshold context_warned )
         } {}
 
         ? ( agent_context_preflight `anthropic` model request_tokens max_tokens ) {
@@ -1009,31 +1054,9 @@ i max_tokens
         = turn + turn 1
     }
 
-    ? & ! done >= turn max_turns {
-        ( nurl_eprint `[hermes-nurl] hit AGENT_MAX_TURNS without final reply\n` )
-        ( agent_emit_event_text `error` `message` `max turns without final reply` )
-        ( trace_event `agent_error` `max_turns` )
-        ( session_event `agent_error` `max_turns` )
-    } {}
+    ( agent_check_max_turns done turn max_turns )
 
-    ( nurl_eprint `[hermes-nurl] tokens in=` )
-    ( nurl_eprint ( nurl_str_int total_in ) )
-    ( nurl_eprint ` out=` )
-    ( nurl_eprint ( nurl_str_int total_out ) )
-    ( nurl_eprint ` turns=` )
-    ( nurl_eprint ( nurl_str_int turn ) )
-    ( nurl_eprint `\n` )
-    ( agent_emit_usage_event total_in total_out turn )
-
-    : String summary ( string_with_cap 64 )
-    ( string_push_str summary `tokens in=` )
-    ( string_push_int summary total_in )
-    ( string_push_str summary ` out=` )
-    ( string_push_int summary total_out )
-    ( string_push_str summary ` turns=` )
-    ( string_push_int summary turn )
-    ( trace_event `agent_finish` ( string_data summary ) )
-    ( string_free summary )
+    ( agent_emit_turn_summary total_in total_out turn )
     ^ exit_code
 }
 
@@ -1168,46 +1191,11 @@ i max_tokens
         ( agent_emit_event_int `turn` `turn` turn )
         ( trace_event_int `turn_start` turn )
 
-        : i request_tokens ( context_request_tokens `` msgs tools )
         : i context_len ( model_context_length ( string_data model ) )
         : i threshold ( context_threshold_tokens context_len )
-        ( trace_event_int `context_request_tokens` request_tokens )
-        ? & ( context_compression_enabled ) >= request_tokens threshold {
-            : i pruned ( context_prune_old_tool_results msgs )
-            ? > pruned 0 {
-                ( trace_event_int `context_pruned_tool_results` pruned )
-                : i before_prune_tokens request_tokens
-                = request_tokens ( context_request_tokens `` msgs tools )
-                ( trace_event_int `context_request_tokens_after_prune` request_tokens )
-                ( agent_log_compression_metric `openai-compatible` `prune_tool_results` before_prune_tokens request_tokens pruned )
-            } {}
-            ? >= request_tokens threshold {
-                : i before_summary_tokens request_tokens
-                : i summarized ( agent_apply_summary `openai-compatible` api_key model msgs request_tokens max_tokens )
-                ? > summarized 0 {
-                    = request_tokens ( context_request_tokens `` msgs tools )
-                    ( trace_event_int `context_request_tokens_after_summary` request_tokens )
-                    ( agent_log_compression_metric `openai-compatible` `provider_summary` before_summary_tokens request_tokens summarized )
-                } {}
-            } {}
-            ? >= request_tokens threshold {
-                : i before_compaction_tokens request_tokens
-                : i compacted ( context_compact_middle msgs request_tokens )
-                ? > compacted 0 {
-                    ( trace_event_int `context_compacted_messages` compacted )
-                    = request_tokens ( context_request_tokens `` msgs tools )
-                    ( trace_event_int `context_request_tokens_after_compaction` request_tokens )
-                    ( agent_log_compression_metric `openai-compatible` `deterministic_summary` before_compaction_tokens request_tokens compacted )
-                    ( nurl_eprint `[hermes-nurl] compacted ` )
-                    ( nurl_eprint ( nurl_str_int compacted ) )
-                    ( nurl_eprint ` middle message(s) into a context summary\n` )
-                } {}
-            } {}
-            ? & >= request_tokens threshold ! context_warned {
-                ( nurl_eprint `[hermes-nurl] context budget still over threshold after compression passes\n` )
-                ( agent_log_compression_remaining `openai-compatible` request_tokens threshold )
-                = context_warned T
-            } {}
+        : i request_tokens ( agent_compress_context `openai-compatible` api_key model msgs tools `` ( context_request_tokens `` msgs tools ) threshold max_tokens )
+        ? ( context_compression_enabled ) {
+            = context_warned ( agent_warn_context_remaining `openai-compatible` request_tokens threshold context_warned )
         } {}
 
         ? ( agent_context_preflight `openai-compatible` model request_tokens max_tokens ) {
@@ -1314,31 +1302,9 @@ i max_tokens
         = turn + turn 1
     }
 
-    ? & ! done >= turn max_turns {
-        ( nurl_eprint `[hermes-nurl] hit AGENT_MAX_TURNS without final reply\n` )
-        ( agent_emit_event_text `error` `message` `max turns without final reply` )
-        ( trace_event `agent_error` `max_turns` )
-        ( session_event `agent_error` `max_turns` )
-    } {}
+    ( agent_check_max_turns done turn max_turns )
 
-    ( nurl_eprint `[hermes-nurl] tokens in=` )
-    ( nurl_eprint ( nurl_str_int total_in ) )
-    ( nurl_eprint ` out=` )
-    ( nurl_eprint ( nurl_str_int total_out ) )
-    ( nurl_eprint ` turns=` )
-    ( nurl_eprint ( nurl_str_int turn ) )
-    ( nurl_eprint `\n` )
-    ( agent_emit_usage_event total_in total_out turn )
-
-    : String summary ( string_with_cap 64 )
-    ( string_push_str summary `tokens in=` )
-    ( string_push_int summary total_in )
-    ( string_push_str summary ` out=` )
-    ( string_push_int summary total_out )
-    ( string_push_str summary ` turns=` )
-    ( string_push_int summary turn )
-    ( trace_event `agent_finish` ( string_data summary ) )
-    ( string_free summary )
+    ( agent_emit_turn_summary total_in total_out turn )
     ^ exit_code
 }
 
