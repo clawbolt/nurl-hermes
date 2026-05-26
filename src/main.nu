@@ -5,6 +5,7 @@ $ `stdlib/core/string.nu`
 $ `stdlib/core/errors.nu`
 $ `nurl/src/common.nu`
 $ `nurl/src/config.nu`
+$ `nurl/src/test_framework.nu`
 $ `nurl/src/context_budget.nu`
 $ `nurl/src/harness.nu`
 $ `nurl/src/message_sanitization.nu`
@@ -525,12 +526,23 @@ $ `nurl/src/providers/openai_compat.nu`
     ^ code
 }
 
-@ run_selftest → i {
+
+// -- Individual test cases for the selftest suite --
+
+@ test_shell_guard → i {
     : b dangerous ( shell_command_blocked `rm -rf /tmp/hermes-nurl-selftest` )
     : b safe ( shell_command_blocked `pwd` )
+    ? dangerous {
+        ? safe { ^ 0 } {}
+        ^ 1
+    } {}
+    ^ 1
+}
+
+@ test_tool_argument_repair → i {
     : String repaired ( repair_tool_call_arguments `{"path":"nurl/README.md",}` `read_file` )
     : !Json ParseErr parsed ( json_parse ( string_data repaired ) )
-    : b repaired_ok ?? parsed {
+    : b ok ?? parsed {
         T j → {
             ( json_free j )
             T
@@ -538,57 +550,77 @@ $ `nurl/src/providers/openai_compat.nu`
         F _ → F
     }
     ( string_free repaired )
+    ? ok { ^ 0 } {}
+    ^ 1
+}
+
+@ test_tool_argument_control_char_repair → i {
     : String control_raw ( string_from `{"text":"alpha` )
     ( string_push_char control_raw 10 )
     ( string_push_str control_raw `beta",}` )
-    : String repaired_control ( repair_tool_call_arguments ( string_data control_raw ) `write_file` )
-    : !Json ParseErr parsed_control ( json_parse ( string_data repaired_control ) )
-    : b repaired_control_ok ?? parsed_control {
+    : String repaired ( repair_tool_call_arguments ( string_data control_raw ) `write_file` )
+    : !Json ParseErr parsed ( json_parse ( string_data repaired ) )
+    : b ok ?? parsed {
         T j → {
             ( json_free j )
             T
         }
         F _ → F
     }
-    ( string_free repaired_control )
+    ( string_free repaired )
     ( string_free control_raw )
+    ? ok { ^ 0 } {}
+    ^ 1
+}
+
+@ test_provider_retry_status → i {
     : String rate_body ( string_from `{"error":{"message":"rate limited"}}` )
     : OpenAICompatErr rate_err ( openai_compat_status_error 429 rate_body )
-    : b retry_status_ok & ( openai_compat_err_retryable rate_err ) ( anthropic_status_retryable 429 )
+    : b ok & ( openai_compat_err_retryable rate_err ) ( anthropic_status_retryable 429 )
     ( string_free rate_body )
+    ? ok { ^ 0 } {}
+    ^ 1
+}
+
+@ test_provider_context_status → i {
     : String context_body ( string_from `{"error":{"message":"This model's maximum context length was exceeded"}}` )
     : OpenAICompatErr context_err ( openai_compat_status_error 400 context_body )
-    : b context_status_ok != ( nurl_str_eq ( openai_compat_err_name context_err ) `OpenAICompatContext` ) 0
+    : b ok != ( nurl_str_eq ( openai_compat_err_name context_err ) `OpenAICompatContext` ) 0
     ( string_free context_body )
-    : ( Vec Json ) prune_msgs ( vec_new [Json] )
-    : String big_tool_output ( string_with_cap 5000 )
+    ? ok { ^ 0 } {}
+    ^ 1
+}
+
+@ test_context_tool_result_pruning → i {
+    : ( Vec Json ) msgs ( vec_new [Json] )
+    : String big ( string_with_cap 5000 )
     : ~ i bi 0
     ~ < bi 5000 {
-        ( string_push_str big_tool_output `x` )
+        ( string_push_str big `x` )
         = bi + bi 1
     }
-    : Json old_tool_msg ( json_obj_new )
-    ( json_obj_set old_tool_msg `role` ( json_str_lit `tool` ) )
-    ( json_obj_set old_tool_msg `tool_call_id` ( json_str_lit `selftest-tool` ) )
-    ( json_obj_set old_tool_msg `content` ( json_str_lit ( string_data big_tool_output ) ) )
-    ( string_free big_tool_output )
-    ( vec_push [Json] prune_msgs old_tool_msg )
+    : Json old_tool ( json_obj_new )
+    ( json_obj_set old_tool `role` ( json_str_lit `tool` ) )
+    ( json_obj_set old_tool `tool_call_id` ( json_str_lit `selftest-tool` ) )
+    ( json_obj_set old_tool `content` ( json_str_lit ( string_data big ) ) )
+    ( string_free big )
+    ( vec_push [Json] msgs old_tool )
     : ~ i mi 0
     ~ < mi 205 {
-        ( vec_push [Json] prune_msgs ( openai_compat_msg `user` `tail` ) )
+        ( vec_push [Json] msgs ( openai_compat_msg `user` `tail` ) )
         = mi + mi 1
     }
-    : i pruned_count ( context_prune_old_tool_results prune_msgs )
-    : ~ b pruned_ok F
-    : ?Json first_msg ( vec_get [Json] prune_msgs 0 )
-    ?? first_msg {
+    : i pruned ( context_prune_old_tool_results msgs )
+    : ~ b ok F
+    : ?Json first ( vec_get [Json] msgs 0 )
+    ?? first {
         T fm → {
-            : ?Json content_j ( json_obj_get fm `content` )
-            ?? content_j {
-                T cj → {
-                    : s content ( json_str_data cj )
-                    ? & == pruned_count 1 != ( nurl_str_find content `[old tool output pruned:` ) -1 {
-                        = pruned_ok T
+            : ?Json cj ( json_obj_get fm `content` )
+            ?? cj {
+                T c → {
+                    : s text ( json_str_data c )
+                    ? & == pruned 1 != ( nurl_str_find text `[old tool output pruned:` ) -1 {
+                        = ok T
                     } {}
                 }
                 F → {}
@@ -597,8 +629,13 @@ $ `nurl/src/providers/openai_compat.nu`
         F → {}
     }
     : ( @ v Json ) drop_json \ Json j → v { ( json_free j ) }
-    ( vec_free_with [Json] prune_msgs drop_json )
-    : ( Vec Json ) compact_msgs ( vec_new [Json] )
+    ( vec_free_with [Json] msgs drop_json )
+    ? ok { ^ 0 } {}
+    ^ 1
+}
+
+@ test_context_deterministic_compaction → i {
+    : ( Vec Json ) msgs ( vec_new [Json] )
     : ~ i ci 0
     ~ < ci 35 {
         : String msg ( string_from `message ` )
@@ -606,24 +643,24 @@ $ `nurl/src/providers/openai_compat.nu`
         ( string_push_str msg ` with enough content to summarize deterministically` )
         : i rem - ci * / ci 2 2
         : s role ? == rem 0 `user` `assistant`
-        ( vec_push [Json] compact_msgs ( openai_compat_msg role ( string_data msg ) ) )
+        ( vec_push [Json] msgs ( openai_compat_msg role ( string_data msg ) ) )
         ( string_free msg )
         = ci + ci 1
     }
-    : i compacted_count ( context_compact_middle compact_msgs 12345 )
-    : ~ b compact_ok F
-    : i compact_len ( vec_len [Json] compact_msgs )
-    : ~ i cmi 0
-    ~ < cmi compact_len {
-        : ?Json ce ( vec_get [Json] compact_msgs cmi )
-        ?? ce {
-            T cm → {
-                : ?Json content_j ( json_obj_get cm `content` )
-                ?? content_j {
-                    T cj → {
-                        : s content ( json_str_data cj )
-                        ? != ( nurl_str_find content `[CONTEXT COMPACTION - REFERENCE ONLY]` ) -1 {
-                            = compact_ok T
+    : i count ( context_compact_middle msgs 12345 )
+    : ~ b ok F
+    : i len ( vec_len [Json] msgs )
+    : ~ i k 0
+    ~ < k len {
+        : ?Json e ( vec_get [Json] msgs k )
+        ?? e {
+            T m → {
+                : ?Json cj ( json_obj_get m `content` )
+                ?? cj {
+                    T c → {
+                        : s text ( json_str_data c )
+                        ? != ( nurl_str_find text `[CONTEXT COMPACTION - REFERENCE ONLY]` ) -1 {
+                            = ok T
                         } {}
                     }
                     F → {}
@@ -631,104 +668,139 @@ $ `nurl/src/providers/openai_compat.nu`
             }
             F → {}
         }
-        = cmi + cmi 1
+        = k + k 1
     }
-    ( vec_free_with [Json] compact_msgs drop_json )
-    : ( Vec Json ) aux_compact_msgs ( vec_new [Json] )
-    : ~ i aci 0
-    ~ < aci 35 {
-        : String msg ( string_from `aux message ` )
-        ( string_push_int msg aci )
-        ( string_push_str msg ` with details for model summary compaction` )
-        : i rem - aci * / aci 2 2
-        : s role ? == rem 0 `user` `assistant`
-        ( vec_push [Json] aux_compact_msgs ( openai_compat_msg role ( string_data msg ) ) )
-        ( string_free msg )
-        = aci + aci 1
-    }
-    : String aux_summary_text ( string_from `selftest auxiliary summary with /tmp/example and command output preserved` )
-    : i aux_compacted_count ( context_compact_middle_with_summary aux_compact_msgs 12345 aux_summary_text )
-    ( string_free aux_summary_text )
-    : ~ b aux_compact_ok F
-    : i aux_len ( vec_len [Json] aux_compact_msgs )
-    : ~ i acmi 0
-    ~ < acmi aux_len {
-        : ?Json ae ( vec_get [Json] aux_compact_msgs acmi )
-        ?? ae {
-            T am → {
-                : ?Json content_j ( json_obj_get am `content` )
-                ?? content_j {
-                    T cj → {
-                        : s content ( json_str_data cj )
-                        ? != ( nurl_str_find content `selftest auxiliary summary` ) -1 {
-                            = aux_compact_ok T
-                        } {}
-                    }
-                    F → {}
-                }
-            }
-            F → {}
-        }
-        = acmi + acmi 1
-    }
-    ( vec_free_with [Json] aux_compact_msgs drop_json )
-    ? ! pruned_ok {
-        ( nurl_print `selftest: failed (context tool-result pruning did not fire)\n` )
-        ( trace_event `selftest` `failed_context_prune` )
-        ^ 1
-    } {}
-    ? | ! compact_ok <= compacted_count 0 {
-        ( nurl_print `selftest: failed (context middle compaction did not produce summary)\n` )
-        ( trace_event `selftest` `failed_context_compaction` )
-        ^ 1
-    } {}
-    ? | ! aux_compact_ok <= aux_compacted_count 0 {
-        ( nurl_print `selftest: failed (auxiliary context summary compaction did not preserve supplied summary)\n` )
-        ( trace_event `selftest` `failed_context_aux_summary_compaction` )
-        ^ 1
-    } {}
-    ? ! repaired_ok {
-        ( nurl_print `selftest: failed (tool argument repair did not produce JSON)\n` )
-        ( trace_event `selftest` `failed_tool_argument_repair` )
-        ^ 1
-    } {}
-    ? ! repaired_control_ok {
-        ( nurl_print `selftest: failed (tool argument control-char repair did not produce JSON)\n` )
-        ( trace_event `selftest` `failed_tool_argument_control_repair` )
-        ^ 1
-    } {}
-    ? ! retry_status_ok {
-        ( nurl_print `selftest: failed (provider retry status classification did not fire)\n` )
-        ( trace_event `selftest` `failed_retry_status_classification` )
-        ^ 1
-    } {}
-    ? ! context_status_ok {
-        ( nurl_print `selftest: failed (provider context status classification did not fire)\n` )
-        ( trace_event `selftest` `failed_context_status_classification` )
-        ^ 1
-    } {}
-    ? dangerous {
-        ? safe {
-            ( nurl_print `selftest: failed (safe command was blocked)\n` )
-            ( trace_event `selftest` `failed_safe_blocked` )
-            ^ 1
-        } {
-            : Json args ( json_obj_new )
-            ( json_obj_set args `path` ( json_str_lit `nurl/README.md` ) )
-            ( session_tool_call_args_json `selftest-call` `read_file` args )
-            ( json_free args )
-            ( session_tool_result `selftest-call` `read_file` F 0 )
-            ( nurl_print `selftest: ok\n` )
-            ( trace_event `selftest` `ok` )
-            ^ 0
-        }
-    } {
-        ( nurl_print `selftest: failed (dangerous command was allowed)\n` )
-        ( trace_event `selftest` `failed_dangerous_allowed` )
-        ^ 1
-    }
+    : ( @ v Json ) drop_json \ Json j → v { ( json_free j ) }
+    ( vec_free_with [Json] msgs drop_json )
+    ? & ok > count 0 { ^ 0 } {}
+    ^ 1
 }
 
+@ test_context_auxiliary_summary_compaction → i {
+    : ( Vec Json ) msgs ( vec_new [Json] )
+    : ~ i ai 0
+    ~ < ai 35 {
+        : String msg ( string_from `aux message ` )
+        ( string_push_int msg ai )
+        ( string_push_str msg ` with details for model summary compaction` )
+        : i rem - ai * / ai 2 2
+        : s role ? == rem 0 `user` `assistant`
+        ( vec_push [Json] msgs ( openai_compat_msg role ( string_data msg ) ) )
+        ( string_free msg )
+        = ai + ai 1
+    }
+    : String summary ( string_from `selftest auxiliary summary with /tmp/example and command output preserved` )
+    : i count ( context_compact_middle_with_summary msgs 12345 summary )
+    ( string_free summary )
+    : ~ b ok F
+    : i len ( vec_len [Json] msgs )
+    : ~ i k 0
+    ~ < k len {
+        : ?Json e ( vec_get [Json] msgs k )
+        ?? e {
+            T m → {
+                : ?Json cj ( json_obj_get m `content` )
+                ?? cj {
+                    T c → {
+                        : s text ( json_str_data c )
+                        ? != ( nurl_str_find text `selftest auxiliary summary` ) -1 {
+                            = ok T
+                        } {}
+                    }
+                    F → {}
+                }
+            }
+            F → {}
+        }
+        = k + k 1
+    }
+    : ( @ v Json ) drop_json \ Json j → v { ( json_free j ) }
+    ( vec_free_with [Json] msgs drop_json )
+    ? & ok > count 0 { ^ 0 } {}
+    ^ 1
+}
+
+@ test_http_ipv4_octet → i {
+    // Verify the new RFC 1918 helper parses octets correctly
+    : String h ( string_from `172.24.10.5` )
+    : i o0 ( http_ipv4_octet h 0 )
+    : i o1 ( http_ipv4_octet h 1 )
+    : i o2 ( http_ipv4_octet h 2 )
+    : i o3 ( http_ipv4_octet h 3 )
+    ( string_free h )
+    ? != o0 172 { ^ 1 } {}
+    ? != o1 24 { ^ 1 } {}
+    ? != o2 10 { ^ 1 } {}
+    ? != o3 5 { ^ 1 } {}
+    // Out-of-range index returns -1
+    : String h2 ( string_from `10.0.0.1` )
+    : i o4 ( http_ipv4_octet h2 5 )
+    ( string_free h2 )
+    ? != o4 -1 { ^ 1 } {}
+    ^ 0
+}
+
+@ test_http_172_range_check → i {
+    // Verify the numeric range check covers all of 172.16/12 and nothing outside
+    : String in_range ( string_from `172.20.5.3` )
+    : b in_bad ( http_host_private_or_metadata in_range )
+    ( string_free in_range )
+    ? ! in_bad { ^ 1 } {}
+
+    : String below_range ( string_from `172.15.1.1` )
+    : b below_bad ( http_host_private_or_metadata below_range )
+    ( string_free below_range )
+    ? below_bad { ^ 1 } {}
+
+    : String above_range ( string_from `172.32.0.1` )
+    : b above_bad ( http_host_private_or_metadata above_range )
+    ( string_free above_range )
+    ? above_bad { ^ 1 } {}
+
+    : String boundary_low ( string_from `172.16.0.1` )
+    : b low_bad ( http_host_private_or_metadata boundary_low )
+    ( string_free boundary_low )
+    ? ! low_bad { ^ 1 } {}
+
+    : String boundary_high ( string_from `172.31.255.255` )
+    : b high_bad ( http_host_private_or_metadata boundary_high )
+    ( string_free boundary_high )
+    ? ! high_bad { ^ 1 } {}
+
+    ^ 0
+}
+
+// -- Selftest orchestrator --
+
+@ run_selftest → i {
+    : TestState s ( test_state_new )
+    ( test_run s `shell_guard` ( test_shell_guard ) )
+    ( test_run s `tool_argument_repair` ( test_tool_argument_repair ) )
+    ( test_run s `tool_argument_control_char_repair` ( test_tool_argument_control_char_repair ) )
+    ( test_run s `provider_retry_status` ( test_provider_retry_status ) )
+    ( test_run s `provider_context_status` ( test_provider_context_status ) )
+    ( test_run s `context_tool_result_pruning` ( test_context_tool_result_pruning ) )
+    ( test_run s `context_deterministic_compaction` ( test_context_deterministic_compaction ) )
+    ( test_run s `context_auxiliary_summary_compaction` ( test_context_auxiliary_summary_compaction ) )
+    ( test_run s `http_ipv4_octet` ( test_http_ipv4_octet ) )
+    ( test_run s `http_172_range_check` ( test_http_172_range_check ) )
+
+    // Record a session tool call/result to exercise the session event path
+    : Json args ( json_obj_new )
+    ( json_obj_set args `path` ( json_str_lit `nurl/README.md` ) )
+    ( session_tool_call_args_json `selftest-call` `read_file` args )
+    ( json_free args )
+    ( session_tool_result `selftest-call` `read_file` F 0 )
+
+    : i code ( test_summary s )
+    ( test_state_free s )
+    ? == code 0 {
+        ( trace_event `selftest` `ok` )
+    } {
+        ( trace_event `selftest` `failed` )
+    } {}
+    ^ code
+}
 @ run_prompt → i {
     : String provider ( hermes_nurl_provider_from_env )
     : String model ? ( hermes_provider_is_openai_compat ( string_data provider ) ) {
