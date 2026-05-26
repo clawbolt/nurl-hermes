@@ -131,6 +131,12 @@ $ `nurl/src/providers/openai_compat.nu`
     ( string_free detail )
 }
 
+// HERMES_NURL_FALLBACK_SAFE remains an env var because it is read in
+// deeply nested tool-dispatch paths (run_anthropic/openai_agent_loop) that
+// do not have access to a threaded parameter.  Converting it to a function
+// parameter would require threading it through ~20 functions in the agent
+// loop, tool dispatch, and fallback paths — a high-risk refactor with no
+// behavioral benefit.  See R4.3 in the structural-hardening requirements.
 @ agent_set_fallback_safe b safe → v {
     ? safe {
         : !v IoErr r ( env_set `HERMES_NURL_FALLBACK_SAFE` `1` )
@@ -173,6 +179,33 @@ $ `nurl/src/providers/openai_compat.nu`
         ?? r { T _ → {} F _ → {} }
         ( string_free rendered )
     } {}
+}
+
+
+// Apply provider-specific profile overrides to the environment.
+// Used by run_agent_provider_no_user_with_profile and
+// run_agent_resume_provider_no_user_with_profile to avoid duplicating
+// the provider-branch logic.
+@ agent_apply_profile_env s provider s model_override s base_url_override s api_key_override i max_tokens_override i retries_override i timeout_override i connect_timeout_override → v {
+    ( agent_set_env_int_if_positive `HERMES_NURL_API_MAX_RETRIES` retries_override )
+
+    ? ( hermes_provider_is_openai_compat provider ) {
+        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_MODEL` model_override )
+        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_BASE_URL` base_url_override )
+        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_API_KEY` api_key_override )
+        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_MAX_TOKENS` max_tokens_override )
+        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_TIMEOUT_MS` timeout_override )
+        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_CONNECT_TIMEOUT_MS` connect_timeout_override )
+    } {
+        ? ( hermes_provider_is_anthropic_compat provider ) {
+            ( agent_set_env_if_nonempty `HERMES_NURL_MODEL` model_override )
+            ( agent_set_env_if_nonempty `HERMES_NURL_ANTHROPIC_BASE_URL` base_url_override )
+            ( agent_set_env_if_nonempty `HERMES_NURL_ANTHROPIC_API_KEY` api_key_override )
+            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_MAX_TOKENS` max_tokens_override )
+            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_TIMEOUT_MS` timeout_override )
+            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_CONNECT_TIMEOUT_MS` connect_timeout_override )
+        } {}
+    }
 }
 
 @ agent_stdout_events_enabled → b {
@@ -1787,25 +1820,8 @@ i max_tokens
     : ?String old_anthropic_connect_timeout ( env_get `HERMES_NURL_ANTHROPIC_CONNECT_TIMEOUT_MS` )
     : ?String old_openai_connect_timeout ( env_get `HERMES_NURL_OPENAI_CONNECT_TIMEOUT_MS` )
     : ?String old_retries ( env_get `HERMES_NURL_API_MAX_RETRIES` )
-    ( agent_set_env_int_if_positive `HERMES_NURL_API_MAX_RETRIES` retries_override )
 
-    ? ( hermes_provider_is_openai_compat provider ) {
-        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_MODEL` model_override )
-        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_BASE_URL` base_url_override )
-        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_API_KEY` api_key_override )
-        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_MAX_TOKENS` max_tokens_override )
-        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_TIMEOUT_MS` timeout_override )
-        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_CONNECT_TIMEOUT_MS` connect_timeout_override )
-    } {
-        ? ( hermes_provider_is_anthropic_compat provider ) {
-            ( agent_set_env_if_nonempty `HERMES_NURL_MODEL` model_override )
-            ( agent_set_env_if_nonempty `HERMES_NURL_ANTHROPIC_BASE_URL` base_url_override )
-            ( agent_set_env_if_nonempty `HERMES_NURL_ANTHROPIC_API_KEY` api_key_override )
-            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_MAX_TOKENS` max_tokens_override )
-            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_TIMEOUT_MS` timeout_override )
-            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_CONNECT_TIMEOUT_MS` connect_timeout_override )
-        } {}
-    }
+    ( agent_apply_profile_env provider model_override base_url_override api_key_override max_tokens_override retries_override timeout_override connect_timeout_override )
 
     : i code ( run_agent_provider_no_user provider prompt )
 
@@ -1839,25 +1855,8 @@ i max_tokens
     : ?String old_anthropic_connect_timeout ( env_get `HERMES_NURL_ANTHROPIC_CONNECT_TIMEOUT_MS` )
     : ?String old_openai_connect_timeout ( env_get `HERMES_NURL_OPENAI_CONNECT_TIMEOUT_MS` )
     : ?String old_retries ( env_get `HERMES_NURL_API_MAX_RETRIES` )
-    ( agent_set_env_int_if_positive `HERMES_NURL_API_MAX_RETRIES` retries_override )
 
-    ? ( hermes_provider_is_openai_compat provider ) {
-        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_MODEL` model_override )
-        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_BASE_URL` base_url_override )
-        ( agent_set_env_if_nonempty `HERMES_NURL_OPENAI_API_KEY` api_key_override )
-        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_MAX_TOKENS` max_tokens_override )
-        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_TIMEOUT_MS` timeout_override )
-        ( agent_set_env_int_if_positive `HERMES_NURL_OPENAI_CONNECT_TIMEOUT_MS` connect_timeout_override )
-    } {
-        ? ( hermes_provider_is_anthropic_compat provider ) {
-            ( agent_set_env_if_nonempty `HERMES_NURL_MODEL` model_override )
-            ( agent_set_env_if_nonempty `HERMES_NURL_ANTHROPIC_BASE_URL` base_url_override )
-            ( agent_set_env_if_nonempty `HERMES_NURL_ANTHROPIC_API_KEY` api_key_override )
-            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_MAX_TOKENS` max_tokens_override )
-            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_TIMEOUT_MS` timeout_override )
-            ( agent_set_env_int_if_positive `HERMES_NURL_ANTHROPIC_CONNECT_TIMEOUT_MS` connect_timeout_override )
-        } {}
-    }
+    ( agent_apply_profile_env provider model_override base_url_override api_key_override max_tokens_override retries_override timeout_override connect_timeout_override )
 
     : i code ( run_agent_resume_provider_no_user provider session_id prompt )
 
