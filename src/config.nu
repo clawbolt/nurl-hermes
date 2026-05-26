@@ -148,6 +148,42 @@ $ `stdlib/core/vec.nu`
     ^ ( string_from `` )
 }
 
+
+// Warn to stderr when a config value cannot be parsed as an integer.
+@ config_warn_int_parse s section s key s raw_value → v {
+    ( nurl_eprint `[hermes-nurl] config warning: ` )
+    ? > ( nurl_str_len section ) 0 {
+        ( nurl_eprint section )
+        ( nurl_eprint `.` )
+    } {}
+    ( nurl_eprint key )
+    ( nurl_eprint `: expected integer, got "` )
+    ( nurl_eprint raw_value )
+    ( nurl_eprint `"\n` )
+}
+
+// Parse a config string value as a positive integer.  Returns the default
+// when the value is empty or not parseable; warns on malformed values.
+@ config_parse_positive_int s section s key s raw i default → i {
+    ? == ( string_len raw ) 0 {
+        ( string_free raw )
+        ^ default
+    } {}
+    : !i ParseErr parsed ( string_to_int raw )
+    ?? parsed {
+        T n → {
+            ( string_free raw )
+            ? > n 0 { ^ n } {}
+            ^ default
+        }
+        F _ → {
+            ( config_warn_int_parse section key ( string_data raw ) )
+            ( string_free raw )
+        }
+    }
+    ^ default
+}
+
 @ hermes_config_root_value s wanted → String {
     : String path ( hermes_config_path )
     : !String IoErr rd ( read_file ( string_data path ) )
@@ -354,20 +390,7 @@ $ `stdlib/core/vec.nu`
 }
 
 @ hermes_config_model_fallback_max_tokens → i {
-    : String got ( hermes_config_model_value `fallback_max_tokens` )
-    ? > ( string_len got ) 0 {
-        : !i ParseErr parsed ( string_to_int got )
-        ( string_free got )
-        ?? parsed {
-            T n → {
-                ? > n 0 { ^ n } {}
-            }
-            F _ → {}
-        }
-    } {
-        ( string_free got )
-    }
-    ^ 0
+    ^ ( config_parse_positive_int `model` `fallback_max_tokens` ( hermes_config_model_value `fallback_max_tokens` ) 0 )
 }
 
 @ hermes_config_model_api_key → String {
@@ -375,86 +398,23 @@ $ `stdlib/core/vec.nu`
 }
 
 @ hermes_config_model_context_length → i {
-    : String got ( hermes_config_model_value `context_length` )
-    ? > ( string_len got ) 0 {
-        : !i ParseErr parsed ( string_to_int got )
-        ( string_free got )
-        ?? parsed {
-            T n → { ^ n }
-            F _ → {}
-        }
-    } {
-        ( string_free got )
-    }
-    ^ 0
+    ^ ( config_parse_positive_int `model` `context_length` ( hermes_config_model_value `context_length` ) 0 )
 }
 
 @ hermes_config_model_max_tokens → i {
-    : String got ( hermes_config_model_value `max_tokens` )
-    ? > ( string_len got ) 0 {
-        : !i ParseErr parsed ( string_to_int got )
-        ( string_free got )
-        ?? parsed {
-            T n → {
-                ? > n 0 { ^ n } {}
-            }
-            F _ → {}
-        }
-    } {
-        ( string_free got )
-    }
-    ^ 0
+    ^ ( config_parse_positive_int `model` `max_tokens` ( hermes_config_model_value `max_tokens` ) 0 )
 }
 
 @ hermes_config_agent_api_max_retries → i {
-    : String got ( hermes_config_section_value `agent` `api_max_retries` )
-    ? > ( string_len got ) 0 {
-        : !i ParseErr parsed ( string_to_int got )
-        ( string_free got )
-        ?? parsed {
-            T n → {
-                ? > n 0 { ^ n } {}
-            }
-            F _ → {}
-        }
-    } {
-        ( string_free got )
-    }
-    ^ 0
+    ^ ( config_parse_positive_int `agent` `api_max_retries` ( hermes_config_section_value `agent` `api_max_retries` ) 0 )
 }
 
 @ hermes_config_agent_fallback_api_max_retries → i {
-    : String got ( hermes_config_section_value `agent` `fallback_api_max_retries` )
-    ? > ( string_len got ) 0 {
-        : !i ParseErr parsed ( string_to_int got )
-        ( string_free got )
-        ?? parsed {
-            T n → {
-                ? > n 0 { ^ n } {}
-            }
-            F _ → {}
-        }
-    } {
-        ( string_free got )
-    }
-    ^ 0
+    ^ ( config_parse_positive_int `agent` `fallback_api_max_retries` ( hermes_config_section_value `agent` `fallback_api_max_retries` ) 0 )
 }
 
 @ hermes_config_section_positive_int s section s key → i {
-    : String got ( hermes_config_section_value section key )
-    ? > ( string_len got ) 0 {
-        : !i ParseErr parsed ( string_to_int got )
-        ( string_free got )
-        ?? parsed {
-            T n → {
-                ? > n 0 { ^ n } {}
-            }
-            F _ → {}
-        }
-    } {
-        ( string_free got )
-    }
-    ^ 0
+    ^ ( config_parse_positive_int section key ( hermes_config_section_value section key ) 0 )
 }
 
 @ hermes_config_agent_api_timeout_ms → i {
@@ -474,20 +434,7 @@ $ `stdlib/core/vec.nu`
 }
 
 @ hermes_config_agent_max_turns → i {
-    : String got ( hermes_config_section_value `agent` `max_turns` )
-    ? > ( string_len got ) 0 {
-        : !i ParseErr parsed ( string_to_int got )
-        ( string_free got )
-        ?? parsed {
-            T n → {
-                ? > n 0 { ^ n } {}
-            }
-            F _ → {}
-        }
-    } {
-        ( string_free got )
-    }
-    ^ 0
+    ^ ( config_parse_positive_int `agent` `max_turns` ( hermes_config_section_value `agent` `max_turns` ) 0 )
 }
 
 @ hermes_config_network_value s wanted → String {
