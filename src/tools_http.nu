@@ -225,6 +225,56 @@ $ `nurl/src/config.nu`
     ^ bad
 }
 
+
+// Extract the Nth octet (0-based) from a dotted-decimal IPv4 string.
+// Returns -1 if the index is out of range or parsing fails.
+@ http_ipv4_octet String lower i idx → i {
+    : i n ( string_len lower )
+    : ~ i start 0
+    : ~ i cur 0
+    : ~ i result -1
+    : ~ i k 0
+    ~ < k n {
+        : i c ( string_get lower k )
+        ? == c 46 {
+            ? == cur idx {
+                : String raw ( string_substr lower start - k start )
+                : !i ParseErr parsed ( string_to_int raw )
+                ( string_free raw )
+                ?? parsed {
+                    T v → {
+                        ? & >= v 0 <= v 255 { = result v } {}
+                    }
+                    F _ → {}
+                }
+                = k n
+            } {
+                = start + k 1
+                = cur + cur 1
+            }
+        } {}
+        = k + k 1
+    }
+    // Handle last octet if idx is the final segment
+    ? == cur idx {
+        ? == result -1 {
+            ? > n start {
+                : String raw2 ( string_substr lower start - n start )
+                : !i ParseErr parsed2 ( string_to_int raw2 )
+                ( string_free raw2 )
+                ?? parsed2 {
+                    T v2 → {
+                        ? & >= v2 0 <= v2 255 { = result v2 } {}
+                    }
+                    F _ → {}
+                }
+            } {}
+        } {}
+    } {}
+    ^ result
+}
+
+
 @ http_host_private_or_metadata s host → b {
     : String h0 ( string_from host )
     : String h ( string_to_lower h0 )
@@ -239,22 +289,8 @@ $ `nurl/src/config.nu`
     ? ( string_starts_with h `192.168.` ) { = bad T } {}
     ? ( string_starts_with h `169.254.` ) { = bad T } {}
     ? ( string_starts_with h `0.` ) { = bad T } {}
-    ? ( string_starts_with h `172.16.` ) { = bad T } {}
-    ? ( string_starts_with h `172.17.` ) { = bad T } {}
-    ? ( string_starts_with h `172.18.` ) { = bad T } {}
-    ? ( string_starts_with h `172.19.` ) { = bad T } {}
-    ? ( string_starts_with h `172.20.` ) { = bad T } {}
-    ? ( string_starts_with h `172.21.` ) { = bad T } {}
-    ? ( string_starts_with h `172.22.` ) { = bad T } {}
-    ? ( string_starts_with h `172.23.` ) { = bad T } {}
-    ? ( string_starts_with h `172.24.` ) { = bad T } {}
-    ? ( string_starts_with h `172.25.` ) { = bad T } {}
-    ? ( string_starts_with h `172.26.` ) { = bad T } {}
-    ? ( string_starts_with h `172.27.` ) { = bad T } {}
-    ? ( string_starts_with h `172.28.` ) { = bad T } {}
-    ? ( string_starts_with h `172.29.` ) { = bad T } {}
-    ? ( string_starts_with h `172.30.` ) { = bad T } {}
-    ? ( string_starts_with h `172.31.` ) { = bad T } {}
+    // 172.16.0.0/12: first octet == 172, second octet in [16,31]
+    ? & == ( http_ipv4_octet h 0 ) 172 & >= ( http_ipv4_octet h 1 ) 16 <= ( http_ipv4_octet h 1 ) 31 { = bad T } {}
     ? ( string_starts_with h `fe80` ) { = bad T } {}
     ? ( string_starts_with h `fc` ) { = bad T } {}
     ? ( string_starts_with h `fd` ) { = bad T } {}
